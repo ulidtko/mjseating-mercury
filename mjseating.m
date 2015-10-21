@@ -324,6 +324,11 @@ main(Options, !IO) :-
         write_string("Players count must be a multiple of 4.\n", !IO),
         set_exit_status(2, !IO)
     ;
+        NPlayers * (NPlayers - 1) / 2 < 6 * NHanchans * NPlayers / 4 ->
+        write_string(format("Not enough players!\n%d players form %d distinct pairs - that is too few for %d hanchans.\n",
+            [i(NPlayers), i(NPlayers * (NPlayers - 1) / 2), i(NHanchans)]), !IO),
+        set_exit_status(3, !IO)
+    ;
         run_search({NPlayers, NHanchans}, !IO)
     ).
 
