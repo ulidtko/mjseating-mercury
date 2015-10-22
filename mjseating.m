@@ -7,7 +7,7 @@
 
 :- type player == int.
 
-:- type table == set(player). % exactly 4 players
+:- type table == quad(player).
 :- type hanchan == list(table).
 
 :- type metDB == set({player, player}).
@@ -37,14 +37,15 @@ thd({_, _, X, _}) = X.
 :- func fth({T1, T2, T3, T4}) = T4.
 fth({_, _, _, X}) = X.
 
+:- func quadToSet(quad(T)) = set(T).
+quadToSet({PA,PB,PC,PD}) = set([PA,PB,PC,PD]).
 
-:- func tablePairs(table) = set({player,player}).
-tablePairs(T) = set([{A,B}, {A,C}, {A,D}, {B,C}, {B,D}, {C,D}]) :-
-    L = to_sorted_list(T),
-    A = det_index1(L, 1),
-    B = det_index1(L, 2),
-    C = det_index1(L, 3),
-    D = det_index1(L, 4).
+:- func tablePairs(table) = list({player,player}).
+tablePairs({A,B,C,D}) = [{A,B}, {A,C}, {A,D}, {B,C}, {B,D}, {C,D}].
+
+:- pred listChoice(list(T)::in, T::out, list(T)::out) is nondet.
+listChoice([X | T], X, T).
+listChoice([_ | T], X, R) :- listChoice(T, X, R).
 
 
 %----- CORE LOGIC -----
@@ -59,22 +60,33 @@ allQuads(Players, Quads) :-
             member(PD, Players), PD > PC
     ), Quads).
 
+:- pred freePlayersInQuad(set(player)::in, quad(player)::in) is semidet.
+freePlayersInQuad(FreePlayers, {PA,PB,PC,PD}) :-
+    member(PA, FreePlayers),
+    member(PB, FreePlayers),
+    member(PC, FreePlayers),
+    member(PD, FreePlayers).
 
-:- pred fillTable(
-      table::out
-    , set(player)::in
-    , set(player)::out
-    , metDB::in
-    , metDB::out
-    ) is nondet.
+:- func cullConflictingQuads(pquads, quad(player)) = pquads.
+cullConflictingQuads(QSi, Qc) = set.filter(quadConflict(Qc), QSi).
 
-fillTable(Table, Ps, PsRest, DB, DBout) :-
-    %(compare((>), count(Ps), 4); checkConstraints(Ps, _, DB, _)),
+:- pred quadConflict(quad(T)::in, quad(T)::in) is semidet.
+quadConflict({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
+    %-- success when no intersecting pairs
+    set.intersect(Pairs1, Pairs2, set.init),
+    Pairs1 = sorted_list_to_set([{PA1,PB1},{PA1,PC1},{PA1,PD1},{PB1,PC1},{PB1,PD1},{PC1,PD1}]),
+    Pairs2 = sorted_list_to_set([{PA2,PB2},{PA2,PC2},{PA2,PD2},{PB2,PC2},{PB2,PD2},{PC2,PD2}]).
 
-    subsetExact4(Ps, Table, Pairs, neverMet(DB)),
-    %is_empty(intersect(Pairs, DB)),
-    PsRest = set.difference(Ps, Table),
-    DBout = set.union(DB, Pairs).
+:- func cullHanchanQuads(hanchan, pquads) = pquads.
+cullHanchanQuads(Hanchan, Qs) = set.filter((
+        pred({A,B,C,D}::in) is semidet :- set.intersect(
+            HanchanPairs,
+            sorted_list_to_set([{A,B},{A,C},{A,D},{B,C},{B,D},{C,D}]),
+            set.init
+        )
+    ), Qs) :-
+    HanchanPairs = set(condense(map(tablePairs, Hanchan)))
+    .
 
 
 :- pred subsetExact4(
@@ -108,61 +120,55 @@ subsetExact4(SIn, SOut, Pairs, UserCond) :-
     Pairs = sorted_list_to_set([{L1,L2},{L1,L3},{L1,L4},{L2,L3},{L2,L4},{L3,L4}]).
 
 
-:- pred fillNTables(
-      int::in
-    , list(table)::out
-    , set(player)::in
-    , metDB::in
-    , metDB::out) is nondet.
-
-fillNTables(0, [], _, D, D).
-
-fillNTables(N, Tables, Players, DB, DBout) :-
-    fillTable(Table0, Players, PlayersRest, DB, DBupd1),
-    fillNTables(N - 1, TablesN1, PlayersRest, DB, DBupd2),
-    DBout = set.union(DBupd1, DBupd2),
-    Tables = [Table0 | TablesN1].
-
-
 :- pred fillAllTables(
       list(table)::out
     , set(player)::in
-    , metDB::in
-    , metDB::out
+    , pquads::in
+    , pquads::out
     ) is nondet.
+fillAllTables([],        set.init, Q, Q).
+fillAllTables([Q0 | QN1], Players, Quads, QuadsOut) :-
+    %-- select a table configuration (quad)
+    listChoice(to_sorted_list(Quads), Q0, QuadsRest),
 
-fillAllTables([], set([]), D, D).
+    %-- check that no player is chosen twice in a hanchan
+    freePlayersInQuad(Players, Q0),
 
-fillAllTables(Tables, Players, DB, DBout) :-
-    fillTable(Table0, Players, PlayersRest, DB, DBupd1),
-    fillAllTables(TablesN1, PlayersRest, DB, DBupd2),
-    DBout = set.union(DBupd1, DBupd2),
-    Tables = [Table0 | TablesN1].
+    %-- cull impossible quads according to our choice of Q0
+    QuadsCulled = cullConflictingQuads(sorted_list_to_set(QuadsRest), Q0),
+
+    %-- recurse for rest of players
+    PlayersRest = set.difference(Players, quadToSet(Q0)),
+    fillAllTables(QN1, PlayersRest, QuadsCulled, QuadsOut)
+    .
 
 
 :- pred searchNHanchans(
       int::in
     , set(player)::in
     , list(hanchan)::out
-    , metDB::out
+    , pquads::out
     ) is nondet.
-searchNHanchans(0,       _, [], set.init).
-searchNHanchans(N, Players, [H0 | Hn1], DBupd) :-
+searchNHanchans(0, Players, [], Q) :- allQuads(Players, Q).
+searchNHanchans(N, Players, [H0 | Hn1], QuadsUpd) :-
     N > 0,
-    fillAllTables(H0, Players, DBbase, DBupd),
-    trace [io(!IO)] (
+    searchNHanchans(N - 1, Players, Hn1, QuadsBase),
+    fillAllTables(H0, Players, QuadsBase, _),
+    QuadsUpd = cullHanchanQuads(H0, QuadsBase),
+
+    trace [run_time(env("TRACE")), io(!IO)] (
         io.write_string("== Candidate hanchan " ++ string(N) ++ " ==", !IO), io.nl(!IO),
-        io.write_string("  Tables: " ++ string(H0), !IO), io.nl(!IO),
-        io.write_string("  DB: " ++ pprintDB2Dot(DBupd), !IO), io.nl(!IO)
-        %io.write_string("  C(DB): " ++ pprintDB2Dot(dbComplement(DBupd)), !IO), io.nl(!IO)
-    ),
-    searchNHanchans(N - 1, Players, Hn1, DBbase).
+        io.write_string("  Tables: " ++ string(H0), !IO), io.nl(!IO)
+        %io.write_string("  DB: " ++ pprintDB2Dot(QuadsUpd), !IO), io.nl(!IO)
+        %io.write_string("  C(DB): " ++ pprintDB2Dot(dbComplement(QuadsUpd)), !IO), io.nl(!IO)
+    )
+    .
 
 
 %----- PRETTY PRINTING -----
 
-:- func pprintHanchan(list(table)) = list(list(player)).
-pprintHanchan(H) = map(to_sorted_list, H).
+%:- func pprintHanchan(list(quad(player))) = list(list(player)).
+%pprintHanchan(H) = map(to_sorted_list, H).
 
 :- func pprintDB2Dot(metDB) = string.
 pprintDB2Dot(DB) = "strict graph { " ++ join_list("; ", Lines) ++ "}" :-
@@ -255,10 +261,10 @@ process_solution(S, DoContinue) -->
     printSolution(S),
     get_nSolutions(N),
     set_nSolutions(N + 1),
-    { DoContinue = no }.% pred_to_bool(N + 1 < 200) }.
+    { DoContinue = pred_to_bool(N + 1 < 200) }.
 
 :- pred printSolution(list(hanchan)::in, io::di, io::uo).
 printSolution(S) -->
-    io.print(map(pprintHanchan, S)),
+    io.print(S),
     io.write_string("\n\n")
     .
