@@ -38,7 +38,7 @@ thd({_, _, X, _}) = X.
 fth({_, _, _, X}) = X.
 
 :- func quadToSet(quad(T)) = set(T).
-quadToSet({PA,PB,PC,PD}) = set([PA,PB,PC,PD]).
+quadToSet({PA,PB,PC,PD}) = sorted_list_to_set([PA,PB,PC,PD]).
 
 :- func tablePairs(table) = list({player,player}).
 tablePairs({A,B,C,D}) = [{A,B}, {A,C}, {A,D}, {B,C}, {B,D}, {C,D}].
@@ -128,13 +128,13 @@ subsetExact4(SIn, SOut, Pairs, UserCond) :-
     ) is nondet.
 fillAllTables([],        set.init, Q, Q).
 fillAllTables([Q0 | QN1], Players, Quads, QuadsOut) :-
+    %-- here we're interested in quads consisting of only free players
+    NonBoringQuads = set.filter(freePlayersInQuad(Players), Quads),
+
     %-- select a table configuration (quad)
-    listChoice(to_sorted_list(Quads), Q0, QuadsRest),
+    listChoice(to_sorted_list(NonBoringQuads), Q0, QuadsRest),
 
-    %-- check that no player is chosen twice in a hanchan
-    freePlayersInQuad(Players, Q0),
-
-    %-- cull impossible quads according to our choice of Q0
+    %-- exclude impossible quads according to our choice of Q0
     QuadsCulled = cullConflictingQuads(sorted_list_to_set(QuadsRest), Q0),
 
     %-- recurse for rest of players
@@ -261,7 +261,7 @@ process_solution(S, DoContinue) -->
     printSolution(S),
     get_nSolutions(N),
     set_nSolutions(N + 1),
-    { DoContinue = pred_to_bool(N + 1 < 200) }.
+    { DoContinue = pred_to_bool(N + 1 < 20) }.
 
 :- pred printSolution(list(hanchan)::in, io::di, io::uo).
 printSolution(S) -->
