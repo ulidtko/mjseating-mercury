@@ -6,3 +6,6 @@ mjseating_init.c
 mjseating.mih
 Deep.data
 Deep.procrep
+*.o
+*.d
+__pycache__

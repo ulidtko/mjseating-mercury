@@ -1,3 +1,33 @@
+% Copyright (C) 2015-2019 Max Ulidtko <ulidtko@gmail.com>. All rights reserved.
+% SPDX-License-Identifier: MIT
+
+% This file is written in [Mercury], a statically-typed Prolog variant.
+%
+% What does this program compute?
+% Tournament grids (player seatings) for the [Riichi Mahjong] game.
+% Players are represented simply by integers: 1, 2, 3, 4, and so on.
+% The generated results comprise a full tournament schedule, listing tables of
+% every hanchan. Each table lists 4 players. Solutions contain no "intersections":
+% not a single pair of players meet more than once during the whole tournament.
+%
+% Once compiled, usage is as simple as:
+%     ./mjseating -P <NUM_PLAYERS> -H <NUM_HANCHANS>
+%
+% See the Mercury user guide for details on how to compile. TL;DR:
+%     mmc --grade hlc.gc mjseating.m
+%
+% Be aware that the search will likely take a long time. 24-player-6-hanchan
+% computation been running for *23 to 29 hours* on my machine to find any results.
+% Smaller parameters of course will run faster. 20-player-5-hanchan solves in <1s.
+%
+% You'll find samples of generated seatings under data/. There's also a little
+% python helper script to re-check solution correctness (0 intersections).
+%
+% Please let me know if you find this useful.
+%
+% [Mercury]: https://mercurylang.org/
+% [Riichi Mahjong]: https://en.wikipedia.org/wiki/Japanese_Mahjong
+
 :- module mjseating.
 
 :- interface.
@@ -157,9 +187,9 @@ searchNHanchans(N, Players, [H0 | Hn1], QuadsUpd) :-
     QuadsUpd = cullHanchanQuads(H0, QuadsBase),
 
     trace [run_time(env("TRACE")), io(!IO)] (
-        io.write_string("== Candidate hanchan " ++ string(N) ++ " ==", !IO), io.nl(!IO),
-        io.write_string("  Tables: " ++ string(H0), !IO), io.nl(!IO)
-        %io.write_string("  DB: " ++ pprintDB2Dot(QuadsUpd), !IO), io.nl(!IO)
+        io.write_string("=== Candidate hanchan " ++ string(N) ++ " ===", !IO), io.nl(!IO),
+        io.write_string("    Tables: " ++ string([H0 | Hn1]), !IO), io.nl(!IO),
+        io.write_string("    Quads: " ++ string(QuadsUpd), !IO), io.nl(!IO)
         %io.write_string("  C(DB): " ++ pprintDB2Dot(dbComplement(QuadsUpd)), !IO), io.nl(!IO)
     )
     .
@@ -234,7 +264,9 @@ main(Options, !IO) :-
         set_exit_status(2, !IO)
     ;
         NHanchans * 3 >= NPlayers ->
-        write_string(format("Too many hanchans!\nIn %d hanchans, each player is going to meet %d distinct opponents. With %d players, this isn't possible.\n",
+        write_string(format("Too many hanchans!\n" ++
+            "In %d hanchans, each player is going to meet %d distinct opponents. " ++
+            "With %d players, this isn't possible without intersections.\n",
             [i(NHanchans), i(NHanchans * 3), i(NPlayers)]), !IO),
         set_exit_status(3, !IO)
     ;
@@ -268,3 +300,5 @@ printSolution(S) -->
     io.print(S),
     io.write_string("\n\n")
     .
+
+% vim: filetype=prolog
