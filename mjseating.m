@@ -119,35 +119,6 @@ cullHanchanQuads(Hanchan, Qs) = set.filter((
     .
 
 
-:- pred subsetExact4(
-      set(player)::in
-    , set(player)::out
-    , metDB::out
-    , pred({player,player})::(pred(in) is semidet)
-    ) is nondet.
-subsetExact4(SIn, SOut, Pairs, UserCond) :-
-    N = count(SIn),
-    N >= 4, % -> K1 = 1, K2 = 2, K3 = 3, K4 = 4
-
-    K1 = 1,
-    nondet_int_in_range(K1+1, N, K2),
-        UserCond({L1,L2}),
-    nondet_int_in_range(K2+1, N, K3),
-        UserCond({L1,L3}),
-        UserCond({L2,L3}),
-    nondet_int_in_range(K3+1, N, K4),
-        UserCond({L1,L4}),
-        UserCond({L2,L4}),
-        UserCond({L3,L4}),
-
-    L = to_sorted_list(SIn),
-    (L1:player) = det_index1(L, K1),
-    (L2:player) = det_index1(L, K2),
-    (L3:player) = det_index1(L, K3),
-    (L4:player) = det_index1(L, K4),
-
-    SOut = sorted_list_to_set([L1, L2, L3, L4]),
-    Pairs = sorted_list_to_set([{L1,L2},{L1,L3},{L1,L4},{L2,L3},{L2,L4},{L3,L4}]).
 
 
 :- pred fillAllTables(
