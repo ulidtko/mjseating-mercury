@@ -118,7 +118,17 @@ cullHanchanQuads(Hanchan, Qs) = set.filter((
     HanchanPairs = set(condense(map(tablePairs, Hanchan)))
     .
 
+:- pred sufficientQuadsCut(int::in, set(player)::in, pquads::in) is semidet.
+sufficientQuadsCut(NH, Players, Quads) :-
+    %-- assert there's enough Quads for each player for NH more hanchans
+    set.all_true(
+        pred(P::in) is semidet :- countPlayersQuads(P, Quads) >= NH,
+        Players).
 
+:- func countPlayersQuads(player, pquads) = int.
+countPlayersQuads(P, Quads) = set.count(set.filter(
+    (pred({A,B,C,D}::in) is semidet :- P = A; P = B; P = C; P = D),
+    Quads)).
 
 
 :- pred fillAllTables(
@@ -137,6 +147,9 @@ fillAllTables([Q0 | QN1], Players, Quads, QuadsOut) :-
 
     %-- exclude impossible quads according to our choice of Q0
     QuadsCulled = cullConflictingQuads(sorted_list_to_set(QuadsRest), Q0),
+
+    %-- ensure there's at least 1 quad for each player remaining
+    sufficientQuadsCut(1, PlayersRest, QuadsCulled),
 
     %-- recurse for rest of players
     PlayersRest = set.difference(Players, quadToSet(Q0)),
