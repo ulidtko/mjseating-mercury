@@ -39,6 +39,7 @@
 
 :- type table == quad(player).
 :- type hanchan == list(table).
+:- type schedule == list(hanchan).
 
 :- type metDB == set({player, player}).
 
@@ -163,7 +164,7 @@ fillAllTables([Q0 | QN1], Players, Quads, QuadsOut) :-
 :- pred searchNHanchans(
       int::in
     , set(player)::in
-    , list(hanchan)::out
+    , schedule::out
     , pquads::out
     ) is nondet.
 searchNHanchans(0, Players, [], Q) :- allQuads(Players, Q).
@@ -270,6 +271,10 @@ run_search({NP, NH}, !IO) :-
         process_solution,
         !IO
     ),
+    %io.report_stats(!IO),
+    %io.report_stats("standard", !IO),
+    %io.report_stats("full_memory_stats", !IO),
+    %io.report_stats("tabling", !IO),
     io.write_string("Printing no more solutions.\n", !IO)
     .
 
@@ -277,15 +282,31 @@ run_search({NP, NH}, !IO) :-
 
 :- pred process_solution(list(hanchan)::in, bool::out, io::di, io::uo) is det.
 process_solution(S, DoContinue) -->
-    printSolution(S),
+    print_solution(S),
     get_nSolutions(N),
     set_nSolutions(N + 1),
     { DoContinue = pred_to_bool(N + 1 < 20) }.
 
-:- pred printSolution(list(hanchan)::in, io::di, io::uo).
-printSolution(S) -->
-    io.print(S),
-    io.write_string("\n\n")
-    .
+:- mutable(iFmtHanchan, int, 1, ground, [untrailed, attach_to_io_state]).
+
+:- pred print_solution(schedule::in, io::di, io::uo) is det.
+print_solution(S) -->
+    io.write_string("{\n"),
+    set_iFmtHanchan(1),
+    io.write_list(S, ",\n", print_hanchan),
+    io.write_string("\n}\n").
+
+:- pred print_hanchan(hanchan::in, io::di, io::uo) is det.
+print_hanchan(H) -->
+    get_iFmtHanchan(IH),
+    set_iFmtHanchan(IH + 1),
+    io.format("  \"H%d\": ", [i(IH)]),
+    io.write_string(format_hanchan(H)).
+
+:- func format_hanchan(hanchan) = string.
+format_hanchan(H) = "[" ++ join_list(", ", map(format_table, H)) ++ "]".
+:- func format_table(table) = string.
+format_table({PA, PB, PC, PD}) =
+    string.format("[%2d, %2d, %2d, %2d]", [i(PA), i(PB), i(PC), i(PD)]).
 
 % vim: filetype=prolog
