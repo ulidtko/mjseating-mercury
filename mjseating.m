@@ -103,9 +103,12 @@ cullConflictingQuads(QSi, Qc) = set.filter(quadConflict(Qc), QSi).
 :- pred quadConflict(quad(T)::in, quad(T)::in) is semidet.
 quadConflict({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
     %-- success when no intersecting pairs
-    set.intersect(Pairs1, Pairs2, set.init),
-    Pairs1 = sorted_list_to_set([{PA1,PB1},{PA1,PC1},{PA1,PD1},{PB1,PC1},{PB1,PD1},{PC1,PD1}]),
-    Pairs2 = sorted_list_to_set([{PA2,PB2},{PA2,PC2},{PA2,PD2},{PB2,PC2},{PB2,PD2},{PC2,PD2}]).
+    % FIXME rewrite this to peruse a static square NQ×NQ bitmap
+    PA1 \= PA2, PB1 \= PA2, PC1 \= PA2, PD1 \= PA2,
+    PA1 \= PB2, PB1 \= PB2, PC1 \= PB2, PD1 \= PB2,
+    PA1 \= PC2, PB1 \= PC2, PC1 \= PC2, PD1 \= PC2,
+    PA1 \= PD2, PB1 \= PD2, PC1 \= PD2, PD1 \= PD2.
+%:- pragma memo(quadConflict/2).
 
 :- func cullHanchanQuads(hanchan, pquads) = pquads.
 cullHanchanQuads(Hanchan, Qs) = set.filter((
