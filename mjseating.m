@@ -41,8 +41,6 @@
 :- type hanchan == list(table).
 :- type schedule == list(hanchan).
 
-:- type metDB == set({player, player}).
-
 :- type quad(T) == {T, T, T, T}.
 :- type pquads == set(quad(player)).
 
@@ -54,19 +52,8 @@
 :- import_module char, string.
 :- import_module solutions.
 
+
 %----- UTILITIES -----
-
-:- pred neverMet(metDB::in, {player,player}::in) is semidet.
-neverMet(D, PP) :- not member(PP, D).
-
-:- func fst({T1, T2, T3, T4}) = T1.
-fst({X, _, _, _}) = X.
-:- func snd({T1, T2, T3, T4}) = T2.
-snd({_, X, _, _}) = X.
-:- func thd({T1, T2, T3, T4}) = T3.
-thd({_, _, X, _}) = X.
-:- func fth({T1, T2, T3, T4}) = T4.
-fth({_, _, _, X}) = X.
 
 :- func quadToSet(quad(T)) = set(T).
 quadToSet({PA,PB,PC,PD}) = sorted_list_to_set([PA,PB,PC,PD]).
@@ -184,14 +171,6 @@ searchNHanchans(N, Players, [H0 | Hn1], QuadsUpd) :-
 
 
 %----- PRETTY PRINTING -----
-
-%:- func pprintHanchan(list(quad(player))) = list(list(player)).
-%pprintHanchan(H) = map(to_sorted_list, H).
-
-:- func pprintDB2Dot(metDB) = string.
-pprintDB2Dot(DB) = "strict graph { " ++ join_list("; ", Lines) ++ "}" :-
-    Lines = map(func({P1,P2}) = string(P1) ++ " -- " ++ string(P2), to_sorted_list(DB))
-    .
 
 %----- CMDLINE -----
 
