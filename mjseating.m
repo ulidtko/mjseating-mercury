@@ -105,6 +105,13 @@ freePlayersInQuad(FreePlayers, {PA,PB,PC,PD}) :-
     member(PC, FreePlayers),
     member(PD, FreePlayers).
 
+:- pred freePlayersAndFirst(set(player)::in, player::in, pquad::in) is semidet.
+freePlayersAndFirst(FreePlayers, SpecificFirst, {PA,PB,PC,PD}) :-
+    PA = SpecificFirst,
+    member(PB, FreePlayers),
+    member(PC, FreePlayers),
+    member(PD, FreePlayers).
+
 % two quads "intersect" iff they share a player pair.
 :- pred quadXsect(pquad::in, pquad::in) is semidet.
 quadXsect({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
@@ -153,13 +160,13 @@ allQuads(Players, Quads) :-
 :- func quadNumbering(pquads) = quadenum is det.
 quadNumbering(Qs) =
     bimap.det_insert_from_corresponding_lists(
-        1..count(Qs), to_sorted_list(Qs), bimap.init).
+        0..(count(Qs)-1), to_sorted_list(Qs), bimap.init).
 
 % compute once the "quads intersect" relation over all quads.
 :- func precomputeXsectBitmaps(quadenum) = xsects is det.
-precomputeXsectBitmaps(QN) = version_array.from_list( bimap.foldl(
+precomputeXsectBitmaps(QN) = from_list( list.reverse( bimap.foldl(
         func(_IQ, Q, LAcc) = [precomputeXsectBitmap(Q, QN) | LAcc],
-        QN, [] )).
+        QN, [] ))).
 
 :- func precomputeXsectBitmap(pquad, quadenum) = sparse_bitset(iquad) is det.
 precomputeXsectBitmap(Q0, QN) = sorted_list_to_set(list.reverse(bimap.foldl(
@@ -198,46 +205,49 @@ countPlayersQuads(P, Quads) = set.count(set.filter(
       list(table)::out
     , set(player)::in
     , pquads::in
-    , pquads::out
     ) is nondet.
-fillAllTables([],        set.init, Q, Q).
-fillAllTables([Q0 | QN1], Players, Quads, QuadsOut) :-
-    %-- here we're interested in quads consisting of only free players
-    NonBoringQuads = set.filter(freePlayersInQuad(Players), Quads),
+fillAllTables(   []    , set.init, _).
+fillAllTables([Q0 | QN1], Players, Quads) :-
+    %-- due to table symmetry, we only ever try to schedule the minimum player.
+    %-- if even this can't be done: we fail and cut the search branch early.
+    [MinPlayer | _] = to_sorted_list(Players),
+
+    %-- select quads consisting of only free players
+    NonBoringQuads = set.filter(freePlayersAndFirst(Players, MinPlayer), Quads),
+    %NonBoringQuads = set.filter(freePlayersInQuad(Players), Quads),
 
     %-- select a table configuration (quad)
-    listChoice(to_sorted_list(NonBoringQuads), Q0, QuadsRest),
+    listChoice(to_sorted_list(NonBoringQuads), Q0, _),
 
-    %-- exclude impossible quads according to our choice of Q0
-    QuadsCulled = cullConflictingQuads(sorted_list_to_set(QuadsRest), Q0),
+    %-- exclude impossible candidate quads according to our choice of Q0
+    QuadsCulled = cullConflictingQuads(Quads, Q0),
 
     %-- ensure there's at least 1 quad for each player remaining
     sufficientQuadsCut(1, PlayersRest, QuadsCulled),
 
     %-- recurse for rest of players
     PlayersRest = set.difference(Players, quadToSet(Q0)),
-    fillAllTables(QN1, PlayersRest, QuadsCulled, QuadsOut)
-    .
+    fillAllTables(QN1, PlayersRest, QuadsCulled).
 
 
 :- pred searchNHanchans(
-      int::in
+      {int, int}::in
     , set(player)::in
     , schedule::out
     , pquads::out
     ) is nondet.
-searchNHanchans(0, Players, [], Q) :- allQuads(Players, Q).
-searchNHanchans(N, Players, [H0 | Hn1], QuadsUpd) :-
+searchNHanchans({0, _}, Players, [], Q) :- allQuads(Players, Q).
+searchNHanchans({N, NH}, Players, [H0 | Hn1], QuadsUpd) :-
     N > 0,
-    searchNHanchans(N - 1, Players, Hn1, QuadsBase),
-    fillAllTables(H0, Players, QuadsBase, _),
+    searchNHanchans({N - 1, NH}, Players, Hn1, QuadsBase),
+    fillAllTables(H0, Players, QuadsBase),
     QuadsUpd = cullHanchanQuads(H0, QuadsBase),
+    sufficientQuadsCut(NH - N, Players, QuadsUpd),
 
     trace [run_time(env("TRACE")), io(!IO)] (
-        io.write_string("=== Candidate hanchan " ++ string(N) ++ " ===", !IO), io.nl(!IO),
+        io.format("=== Candidate hanchan %d/%d ===\n", [i(N), i(NH)], !IO),
         io.write_string("    Tables: " ++ string([H0 | Hn1]), !IO), io.nl(!IO),
         io.write_string("    Quads: " ++ string(QuadsUpd), !IO), io.nl(!IO)
-        %io.write_string("  C(DB): " ++ pprintDB2Dot(dbComplement(QuadsUpd)), !IO), io.nl(!IO)
     )
     .
 
@@ -327,7 +337,8 @@ run_search({NP, NH}, !IO) :-
 
     do_while(
         pred(Solution::out) is nondet :-
-            searchNHanchans(NH, set(1..NP), Solution, _),
+            searchNHanchans({NH, NH}, set(1..NP), Solution, _),
+            %searchSchedule(Ctx, Solution),
         process_solution,
         !IO
     ),
