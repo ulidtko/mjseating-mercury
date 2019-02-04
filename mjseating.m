@@ -14,7 +14,7 @@
 %     ./mjseating -P <NUM_PLAYERS> -H <NUM_HANCHANS>
 %
 % See the Mercury user guide for details on how to compile. TL;DR:
-%     mmc --grade hlc.gc mjseating.m
+%     mmc --grade hlc.gc -O2 mjseating.m
 %
 % Be aware that the search will likely take a long time. 24-player-6-hanchan
 % computation been running for *23 to 29 hours* on my machine to find any results.
@@ -42,18 +42,51 @@
 :- type schedule == list(hanchan).
 
 :- type quad(T) == {T, T, T, T}.
-:- type pquads == set(quad(player)).
+:- type iquad == int.
+:- type pquad == quad(player).
+:- type pquads == set(pquad).
 
 :- pred main(io::di, io::uo) is cc_multi.
 
-
+%------------------------------------------------------------------------------%
 :- implementation.
-:- import_module bool, int.
-:- import_module char, string.
+
+:- import_module bool, int, float, char, string.
+:- import_module bimap.
+:- import_module sparse_bitset.
+:- import_module version_array.
 :- import_module solutions.
+:- import_module time.
 
 
-%----- UTILITIES -----
+% The context gathers all "almost static" data: things we can precompute
+% before starting search, and query efficiently during the search.
+% None of this mutates at search-time (the whole ctx is read-only),
+% but it depends on input parameters and so can't be completely static.
+:- type ctx ---> ctx(
+        allplayers :: set(player),
+        numtables :: int,
+        numhanchans :: int,
+        allquads :: quadenum,
+        xsects :: xsects
+    ).
+
+:- type quadenum == bimap(int, quad(player)).
+:- type xsects == version_array(sparse_bitset(iquad)).
+
+%------------------------------ UTILITIES -------------------------------------%
+
+:- func initCtx(int, int) = ctx is det.
+initCtx(NTables, NHanchans) = ctx(
+        PlayerSet,
+        NTables,
+        NHanchans,
+        QuadsEnum,
+        Intersections
+    ) :- PlayerSet = set(1..(NTables * 4)),
+         AllQuads = allQuads(PlayerSet),
+         QuadsEnum = quadNumbering(AllQuads),
+         Intersections = precomputeXsectBitmaps(QuadsEnum).
 
 :- func quadToSet(quad(T)) = set(T).
 quadToSet({PA,PB,PC,PD}) = sorted_list_to_set([PA,PB,PC,PD]).
@@ -65,9 +98,47 @@ tablePairs({A,B,C,D}) = [{A,B}, {A,C}, {A,D}, {B,C}, {B,D}, {C,D}].
 listChoice([X | T], X, T).
 listChoice([_ | T], X, R) :- listChoice(T, X, R).
 
+:- pred freePlayersInQuad(set(player)::in, pquad::in) is semidet.
+freePlayersInQuad(FreePlayers, {PA,PB,PC,PD}) :-
+    member(PA, FreePlayers),
+    member(PB, FreePlayers),
+    member(PC, FreePlayers),
+    member(PD, FreePlayers).
 
-%----- CORE LOGIC -----
+% two quads "intersect" iff they share a player pair.
+:- pred quadXsect(pquad::in, pquad::in) is semidet.
+quadXsect({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
+    %not set.intersect(from_list(tablePairs(Q1)), from_list(tablePairs(Q2)), set.init).
+    {PA1,PB1} = {PA2,PB2}; {PA1,PC1} = {PA2,PB2}; {PA1,PD1} = {PA2,PB2};
+        {PB1,PC1} = {PA2,PB2}; {PB1,PD1} = {PA2,PB2}; {PC1,PD1} = {PA2,PB2};
+    {PA1,PB1} = {PA2,PC2}; {PA1,PC1} = {PA2,PC2}; {PA1,PD1} = {PA2,PC2};
+        {PB1,PC1} = {PA2,PC2}; {PB1,PD1} = {PA2,PC2}; {PC1,PD1} = {PA2,PC2};
+    {PA1,PB1} = {PA2,PD2}; {PA1,PC1} = {PA2,PD2}; {PA1,PD1} = {PA2,PD2};
+        {PB1,PC1} = {PA2,PD2}; {PB1,PD1} = {PA2,PD2}; {PC1,PD1} = {PA2,PD2};
+    {PA1,PB1} = {PB2,PC2}; {PA1,PC1} = {PB2,PC2}; {PA1,PD1} = {PB2,PC2};
+        {PB1,PC1} = {PB2,PC2}; {PB1,PD1} = {PB2,PC2}; {PC1,PD1} = {PB2,PC2};
+    {PA1,PB1} = {PB2,PD2}; {PA1,PC1} = {PB2,PD2}; {PA1,PD1} = {PB2,PD2};
+        {PB1,PC1} = {PB2,PD2}; {PB1,PD1} = {PB2,PD2}; {PC1,PD1} = {PB2,PD2};
+    {PA1,PB1} = {PC2,PD2}; {PA1,PC1} = {PC2,PD2}; {PA1,PD1} = {PC2,PD2};
+        {PB1,PC1} = {PC2,PD2}; {PB1,PD1} = {PC2,PD2}; {PC1,PD1} = {PC2,PD2}.
 
+% two quads "conflict" iff they can't be scheduled both into a single hanchan.
+:- pred quadConflictNot(pquad::in, pquad::in) is semidet.
+quadConflictNot({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
+    PA1 \= PA2, PB1 \= PA2, PC1 \= PA2, PD1 \= PA2,
+    PA1 \= PB2, PB1 \= PB2, PC1 \= PB2, PD1 \= PB2,
+    PA1 \= PC2, PB1 \= PC2, PC1 \= PC2, PD1 \= PC2,
+    PA1 \= PD2, PB1 \= PD2, PC1 \= PD2, PD1 \= PD2.
+%:- pragma memo(quadConflictNot/2).
+:- pred quadConflict(pquad::in, pquad::in) is semidet.
+quadConflict(Q1, Q2) :- not quadConflictNot(Q1, Q2).
+
+
+%------------------------------ CORE LOGIC ------------------------------------%
+
+% allQuads computes exactly C(NPlayers, 4) possible quads.
+:- func allQuads(set(player)) = pquads is det.
+allQuads(Ps) = Qs :- allQuads(Ps, Qs).
 :- pred allQuads(set(player)::in, pquads::out) is det.
 allQuads(Players, Quads) :-
     solutions_set((
@@ -78,25 +149,26 @@ allQuads(Players, Quads) :-
             member(PD, Players), PD > PC
     ), Quads).
 
-:- pred freePlayersInQuad(set(player)::in, quad(player)::in) is semidet.
-freePlayersInQuad(FreePlayers, {PA,PB,PC,PD}) :-
-    member(PA, FreePlayers),
-    member(PB, FreePlayers),
-    member(PC, FreePlayers),
-    member(PD, FreePlayers).
+% establishes quad numbering -- a quad(player) <-> int bijection.
+:- func quadNumbering(pquads) = quadenum is det.
+quadNumbering(Qs) =
+    bimap.det_insert_from_corresponding_lists(
+        1..count(Qs), to_sorted_list(Qs), bimap.init).
 
-:- func cullConflictingQuads(pquads, quad(player)) = pquads.
-cullConflictingQuads(QSi, Qc) = set.filter(quadConflict(Qc), QSi).
+% compute once the "quads intersect" relation over all quads.
+:- func precomputeXsectBitmaps(quadenum) = xsects is det.
+precomputeXsectBitmaps(QN) = version_array.from_list( bimap.foldl(
+        func(_IQ, Q, LAcc) = [precomputeXsectBitmap(Q, QN) | LAcc],
+        QN, [] )).
 
-:- pred quadConflict(quad(T)::in, quad(T)::in) is semidet.
-quadConflict({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
-    %-- success when no intersecting pairs
-    % FIXME rewrite this to peruse a static square NQ×NQ bitmap
-    PA1 \= PA2, PB1 \= PA2, PC1 \= PA2, PD1 \= PA2,
-    PA1 \= PB2, PB1 \= PB2, PC1 \= PB2, PD1 \= PB2,
-    PA1 \= PC2, PB1 \= PC2, PC1 \= PC2, PD1 \= PC2,
-    PA1 \= PD2, PB1 \= PD2, PC1 \= PD2, PD1 \= PD2.
-%:- pragma memo(quadConflict/2).
+:- func precomputeXsectBitmap(pquad, quadenum) = sparse_bitset(iquad) is det.
+precomputeXsectBitmap(Q0, QN) = sorted_list_to_set(list.reverse(bimap.foldl(
+    func(IQ, Q, LAcc) = (if quadXsect(Q0, Q) then [IQ | LAcc] else LAcc),
+    QN, []))).
+
+
+:- func cullConflictingQuads(pquads, pquad) = pquads.
+cullConflictingQuads(QSi, Qc) = set.filter(quadConflictNot(Qc), QSi).
 
 :- func cullHanchanQuads(hanchan, pquads) = pquads.
 cullHanchanQuads(Hanchan, Qs) = set.filter((
@@ -243,10 +315,19 @@ main(Options, !IO) :-
 :- pred run_search({int, int}::in, io::di, io::uo) is cc_multi.
 run_search({NP, NH}, !IO) :-
     % TODO generate no more than a user-requested number of solutions
+
+    /* io.write_string("Warming up...", !IO), io.flush_output(!IO),
+    time.clock(InitT0, !IO),
+
+    Ctx = initCtx(NP // 4, NH),
+
+    time.clock(InitT1, !IO),
+    SecondsElapsed = float(InitT1 - InitT0) / float(time.clocks_per_sec),
+    io.format(" done in %.3fs.\n", [f(SecondsElapsed)], !IO), */
+
     do_while(
-        (pred(Solution::out) is nondet :-
-            searchNHanchans(NH, set(1..NP), Solution, _)
-        ),
+        pred(Solution::out) is nondet :-
+            searchNHanchans(NH, set(1..NP), Solution, _),
         process_solution,
         !IO
     ),
@@ -254,6 +335,7 @@ run_search({NP, NH}, !IO) :-
     %io.report_stats("standard", !IO),
     %io.report_stats("full_memory_stats", !IO),
     %io.report_stats("tabling", !IO),
+    %benchmarking.report_stats(),
     io.write_string("Printing no more solutions.\n", !IO)
     .
 
