@@ -258,19 +258,22 @@ searchNHanchans({N, NH}, Players, [H0 | Hn1], QuadsUpd) :-
 %---------------------------------- CMDLINE -----------------------------------%
 
 :- import_module getopt_io.
-:- type myoption ---> help; playerCount; hanchanCount.
+:- type myoption ---> help; playerCount; hanchanCount; solutionsLimit.
 :- pred shortOpt(char::in, myoption::out) is semidet.
 shortOpt('h', help).
 shortOpt('P', playerCount).
 shortOpt('H', hanchanCount).
+shortOpt('L', solutionsLimit).
 :- pred longOpt(string::in, myoption::out) is semidet.
 longOpt("help", help).
 longOpt("players", playerCount).
 longOpt("hanchans", hanchanCount).
+longOpt("limit", solutionsLimit).
 :- pred defOpt(myoption::out, option_data::out) is multi.
 defOpt(help, bool(no)).
 defOpt(playerCount, int(24)).
 defOpt(hanchanCount, int(8)).
+defOpt(solutionsLimit, int(20)).
 
 :- func usage = string.
 usage = join_list("\n", [
@@ -280,6 +283,7 @@ usage = join_list("\n", [
         "    -h, --help            Show this message and exit",
         "    -P, --players         Set the player count (default is 24)",
         "    -H, --hanchans        Set the number of hanchans (default is 8)",
+        "    -L, --limit           Stop after this many solutions found [20]",
         ""
     ]).
 
@@ -320,13 +324,13 @@ main(Options, !IO) :-
             [i(NHanchans), i(NHanchans * 3), i(NPlayers)]), !IO),
         set_exit_status(3, !IO)
     ;
+        set_solutionsCap(lookup_int_option(Options, solutionsLimit), !IO),
+
         run_search({NPlayers, NHanchans}, !IO)
     ).
 
 :- pred run_search({int, int}::in, io::di, io::uo) is cc_multi.
 run_search({NP, NH}, !IO) :-
-    % TODO generate no more than a user-requested number of solutions
-
     /* io.write_string("Warming up...", !IO), io.flush_output(!IO),
     time.clock(InitT0, !IO),
 
@@ -354,13 +358,15 @@ run_search({NP, NH}, !IO) :-
 %---------------------------- PRETTY PRINTING ---------------------------------%
 
 :- mutable(nSolutions, int, 0, ground, [untrailed,attach_to_io_state]).
+:- mutable(solutionsCap, int, 20, ground, [untrailed,attach_to_io_state]).
 
 :- pred process_solution(list(hanchan)::in, bool::out, io::di, io::uo) is det.
 process_solution(S, DoContinue) -->
     print_solution(S),
     get_nSolutions(N),
     set_nSolutions(N + 1),
-    { DoContinue = pred_to_bool(N + 1 < 20) }.
+    get_solutionsCap(Limit),
+    { DoContinue = pred_to_bool(N + 1 < Limit) }.
 
 :- mutable(iFmtHanchan, int, 1, ground, [untrailed, attach_to_io_state]).
 
