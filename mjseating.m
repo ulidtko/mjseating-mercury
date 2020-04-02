@@ -1,4 +1,4 @@
-% Copyright (C) 2015-2019 Max Ulidtko <ulidtko@gmail.com>. All rights reserved.
+% Copyright (C) 2015-2020 Max Ulidtko <ulidtko@gmail.com>. All rights reserved.
 % SPDX-License-Identifier: MIT
 
 % This file is written in [Mercury], a statically-typed Prolog variant.
@@ -116,6 +116,7 @@ freePlayersAndFirst(FreePlayers, SpecificFirst, {PA,PB,PC,PD}) :-
 :- pred quadXsect(pquad::in, pquad::in) is semidet.
 quadXsect({PA1, PB1, PC1, PD1}, {PA2, PB2, PC2, PD2}) :-
     %not set.intersect(from_list(tablePairs(Q1)), from_list(tablePairs(Q2)), set.init).
+    %-- this way it's much faster (due to no allocations):
     {PA1,PB1} = {PA2,PB2}; {PA1,PC1} = {PA2,PB2}; {PA1,PD1} = {PA2,PB2};
         {PB1,PC1} = {PA2,PB2}; {PB1,PD1} = {PA2,PB2}; {PC1,PD1} = {PA2,PB2};
     {PA1,PB1} = {PA2,PC2}; {PA1,PC1} = {PA2,PC2}; {PA1,PD1} = {PA2,PC2};
@@ -165,8 +166,8 @@ quadNumbering(Qs) =
 % compute once the "quads intersect" relation over all quads.
 :- func precomputeXsectBitmaps(quadenum) = xsects is det.
 precomputeXsectBitmaps(QN) = from_list( list.reverse( bimap.foldl(
-        func(_IQ, Q, LAcc) = [precomputeXsectBitmap(Q, QN) | LAcc],
-        QN, [] ))).
+    func(_IQ, Q, LAcc) = [precomputeXsectBitmap(Q, QN) | LAcc],
+    QN, [] ))).
 
 :- func precomputeXsectBitmap(pquad, quadenum) = sparse_bitset(iquad) is det.
 precomputeXsectBitmap(Q0, QN) = sorted_list_to_set(list.reverse(bimap.foldl(
@@ -254,7 +255,7 @@ searchNHanchans({N, NH}, Players, [H0 | Hn1], QuadsUpd) :-
 
 %----- PRETTY PRINTING -----
 
-%----- CMDLINE -----
+%---------------------------------- CMDLINE -----------------------------------%
 
 :- import_module getopt_io.
 :- type myoption ---> help; playerCount; hanchanCount.
@@ -301,7 +302,7 @@ main -->
         set_exit_status(1)
     ).
 
-%----- MAIN -----
+%------------------------------------ MAIN ------------------------------------%
 
 :- pred main(option_table(myoption)::in, io::di, io::uo) is cc_multi.
 main(Options, !IO) :-
@@ -350,6 +351,8 @@ run_search({NP, NH}, !IO) :-
     io.write_string("Printing no more solutions.\n", !IO)
     .
 
+%---------------------------- PRETTY PRINTING ---------------------------------%
+
 :- mutable(nSolutions, int, 0, ground, [untrailed,attach_to_io_state]).
 
 :- pred process_solution(list(hanchan)::in, bool::out, io::di, io::uo) is det.
@@ -365,7 +368,7 @@ process_solution(S, DoContinue) -->
 print_solution(S) -->
     io.write_string("{\n"),
     set_iFmtHanchan(1),
-    io.write_list(S, ",\n", print_hanchan),
+    io.write_list(reverse(S), ",\n", print_hanchan),
     io.write_string("\n}\n").
 
 :- pred print_hanchan(hanchan::in, io::di, io::uo) is det.
@@ -381,4 +384,4 @@ format_hanchan(H) = "[" ++ join_list(", ", map(format_table, H)) ++ "]".
 format_table({PA, PB, PC, PD}) =
     string.format("[%2d, %2d, %2d, %2d]", [i(PA), i(PB), i(PC), i(PD)]).
 
-% vim: filetype=prolog
+% vim: filetype=mercury
