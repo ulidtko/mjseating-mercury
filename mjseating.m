@@ -76,8 +76,12 @@
         xsects :: xsects
     ).
 
-:- type quadenum == bimap(int, pquad).
+:- type quadenum == bimap(iquad, pquad).
 :- type xsects == version_array(sparse_bitset(iquad)).
+% The xsects map is huge, O(NQ^2) ~ O(NP^8); but it's also sparsely populated
+% (on NP=20, only 3.8M iquad pairs intersect, out of 23.4M all pairs).
+% sparse_bitset does incur a slight to_set() conversion overhead in search loop,
+% but is much faster to initialize than set_tree234, and takes ~8x less memory.
 
 %------------------------------ UTILITIES -------------------------------------%
 
