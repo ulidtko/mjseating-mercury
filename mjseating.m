@@ -34,7 +34,7 @@
 :- import_module io.
 :- import_module list.
 :- import_module set.
-:- import_module set_tree234.
+:- import_module sparse_bitset.
 
 :- type player == int.
 
@@ -46,7 +46,7 @@
 :- type pquad  == quad(player).
 :- type pquads == set(pquad).
 :- type iquad  == int.
-:- type iquads == set_tree234(iquad).
+:- type iquads == sparse_bitset(iquad).
 
 
 :- pred main(io::di, io::uo) is cc_multi.
@@ -57,8 +57,8 @@
 :- import_module bool, int, float, char, string.
 :- import_module bimap.
 :- import_module map.
-:- import_module sparse_bitset.
 :- import_module version_array.
+:- import_module set_tree234.
 :- import_module solutions.
 :- import_module time.
 
@@ -199,7 +199,7 @@ precomputePlayerQuadMap(Players, QuadMap) = map.optimize(R) :-
         QuadMap, Map0, R),
     Map0 = map.from_corresponding_lists(
         L @ to_sorted_list(Players),
-        list.duplicate(length(L), set_tree234.init)
+        list.duplicate(length(L), init)
     ).
 
 :- func cullConflictingQuads(pquads, pquad) = pquads.
@@ -302,10 +302,10 @@ searchNHanchans({N, NH}, Players, [H0 | Hn1], QuadsUpd) :-
 :- pred fillHanchan(
     ctx::in,
     set_tree234(player)::in,
-    set_tree234(iquad)::in,
+    iquads::in,
     list(iquad)::in,
     list(iquad)::out,
-    sparse_bitset(iquad)::out) is nondet.
+    iquads::out) is nondet.
 fillHanchan(_,   init,    _,           _,                  [],        init).
 fillHanchan(Ctx, Players, AvailIquads, [TMin0i|TMins], [T0i|TTi], NewXsects) :-
     %-- symmbreak tables-per-hanchan
@@ -324,7 +324,7 @@ fillHanchan(Ctx, Players, AvailIquads, [TMin0i|TMins], [T0i|TTi], NewXsects) :-
     member(T0i, NonBoringIquads),
 
     HereXsects = Ctx^xsects^elem(T0i),
-    IquadsNX = AvailIquads `difference` from_set(to_set(HereXsects)),
+    IquadsNX = AvailIquads `difference` HereXsects,
     IquadsRestPlayers = cullConflictingIquads(Ctx^quadmap, IquadsNX, T0i),
     {MinPlayer, PB, PC, PD} = lookup(Ctx^quadmap, T0i),
     PlayersRest = PlayersSansMin `difference` from_list([PB, PC, PD]),
@@ -338,8 +338,8 @@ searchSchedule(Ctx, Solution) :-
     NH = Ctx ^ numhanchans,
 
     MinIquads = duplicate(NT, -1),
-    AvailIquads0 = from_list(bimap.ordinates(Ctx^quadmap))
-                `with_type` set_tree234(iquad), %-- [0..NQ)
+    AvailIquads0 = list_to_set(bimap.ordinates(Ctx^quadmap))
+                    `with_type` iquads, %-- [0..NQ)
 
     trace [io(!IO)] (
         io.format("--- searchSchedule entry init done ---\n", [], !IO),
@@ -358,12 +358,10 @@ searchSchedule(Ctx, Solution) :-
             %-- the choice point
             fillHanchan(Ctx, Ctx^allplayers, AvailIquads, MinIquads0,
                 TakenHanchan, XsectIquads_out),
-            AvailIquads1 = AvailIquads `difference`
-                from_set(to_set(XsectIquads_out)) `with_type` iquads,
+            AvailIquads1 = AvailIquads `difference` XsectIquads_out,
 
-            %-- the whole last hanchan (+1) is used to set MinIquads1
-            split_last(TakenHanchan, MinIquadsPre, MinIquadsLast),
-            MinIquads1 = MinIquadsPre ++ [MinIquadsLast + 1],
+            %-- symmbreak hanchans-per-schedule
+            MinIquads1 = [1 + head(TakenHanchan) | tail(MinIquads0)],
 
             %-- heuristic check
             sufficientIquadsCut(Ctx, NH - HanchanIndex, Ctx^allplayers, AvailIquads1)
