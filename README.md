@@ -34,6 +34,13 @@ Use `mmc` (the Melbourne Mercury Compiler):
 
     env TRACE=1 ./mjseating -P16 -H4
 
+## Debugging with mdb ##
+
+    mmc --grade reg.gc.decldebug.stseg mjseating.m
+    mdb ./mjseating -P16 -H4
+
+Debugging user guide: https://mercurylang.org/information/doc-release/mercury_user_guide/Debugging.html
+
 ## Profiling ##
 
 Recompile in a profiling grade:

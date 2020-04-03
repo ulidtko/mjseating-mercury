@@ -9,3 +9,4 @@ Deep.procrep
 *.o
 *.d
 __pycache__
+mdb_query.*
