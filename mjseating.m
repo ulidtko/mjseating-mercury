@@ -240,7 +240,8 @@ countPlayersQuads(P, Quads) = set.count(set.filter(
     set_tree234(player)::in,
     iquads::in) is semidet.
 sufficientIquadsCut(Ctx, NH, Players, Iquads) :-
-    %count(Players) =< count(Iquads),
+    %NH = 0;
+    %count(Players) =< count(Iquads) * 4,
     all_true(
         pred(P::in) is semidet :- count(
             lookup(Ctx^playerquads, P) `intersect` Iquads
@@ -450,39 +451,44 @@ main(Options, !IO) :-
         run_search({NPlayers, NHanchans}, !IO)
     ).
 
-:- pred wallclock(float, pred(io, io), io, io).
-:- mode wallclock(out, pred(di, uo) is det, di, uo) is det.
-wallclock(ResultSeconds, Action, !IO) :-
+:- pred wallclock(float, R, pred(R, io, io), io, io).
+:- mode wallclock(out, out, pred(out, di, uo) is det, di, uo) is det.
+:- mode wallclock(out, out, pred(out, di, uo) is cc_multi, di, uo) is cc_multi.
+wallclock(ResultSeconds, Ret, Action, !IO) :-
     time.clock(ActionTimestamp0, !IO),
-    Action(!IO),
+    call(Action, Ret, !IO),
     time.clock(ActionTimestamp1, !IO),
     ResultSeconds = float(ActionTimestamp1 - ActionTimestamp0)
                     / float(time.clocks_per_sec).
 
 :- pred run_search({int, int}::in, io::di, io::uo) is cc_multi.
-run_search({NP, NH}, !IO) :-
-    %io.write_string("Warming up...", !IO), io.flush_output(!IO),
-    %time.clock(InitT0, !IO),
-    %
-    %Ctx = initCtx(NP // 4, NH),
-    %
-    %time.clock(InitT1, !IO),
-    %SecondsElapsed = float(InitT1 - InitT0) / float(time.clocks_per_sec),
-    %io.format(" done in %.3fs.\n", [f(SecondsElapsed)], !IO),
+run_search({NP, NH}) -->
 
-    do_while(
-        pred(Solution::out) is nondet :-
-            searchNHanchans({NH, NH}, set(1..NP), Solution, _),
-            %searchSchedule(Ctx, Solution),
-        process_solution,
-        !IO
-    ),
+    wallclock(InitSecs, Ctx, (pred(Ctx0::out, di, uo) is det -->
+        io.write_string(stderr_stream, "Warming up..."),
+        io.flush_output(stderr_stream),
+        { Ctx0 = initCtx(NP // 4, NH) })),
+    io.format(stderr_stream, "   done in %.3fs.\n", [f(InitSecs)]),
+
+    wallclock(SearchSecs, _, (pred({}::out, di, uo) is cc_multi -->
+        do_while(
+            pred(Solution::out) is nondet :-
+                %searchNHanchans({NH, NH}, set(1..NP), Solution, _),
+                searchSchedule(Ctx, Solution),
+            process_solution
+        )
+    )),
+
+    get_nSolutions(Found),
+    io.format(stderr_stream, "Found %4d solutions in %.3fs (for P%d-H%d).\n",
+              [i(Found), f(SearchSecs), i(NP), i(NH)]),
+
     %io.report_stats(!IO),
     %io.report_stats("standard", !IO),
     %io.report_stats("full_memory_stats", !IO),
     %io.report_stats("tabling", !IO),
     %benchmarking.report_stats(),
-    io.write_string("Printing no more solutions.\n", !IO)
+    io.write_string(stderr_stream, "Printing no more solutions.\n")
     .
 
 %---------------------------- PRETTY PRINTING ---------------------------------%
