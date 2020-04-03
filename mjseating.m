@@ -34,6 +34,7 @@
 :- import_module io.
 :- import_module list.
 :- import_module set.
+:- import_module set_tree234.
 
 :- type player == int.
 
@@ -42,9 +43,11 @@
 :- type schedule == list(hanchan).
 
 :- type quad(T) == {T, T, T, T}.
-:- type iquad == int.
-:- type pquad == quad(player).
+:- type pquad  == quad(player).
 :- type pquads == set(pquad).
+:- type iquad  == int.
+:- type iquads == set_tree234(iquad).
+
 
 :- pred main(io::di, io::uo) is cc_multi.
 
@@ -53,6 +56,7 @@
 
 :- import_module bool, int, float, char, string.
 :- import_module bimap.
+:- import_module map.
 :- import_module sparse_bitset.
 :- import_module version_array.
 :- import_module solutions.
@@ -64,14 +68,15 @@
 % None of this mutates at search-time (the whole ctx is read-only),
 % but it depends on input parameters and so can't be completely static.
 :- type ctx ---> ctx(
-        allplayers :: set(player),
+        allplayers :: set_tree234(player),
         numtables :: int,
         numhanchans :: int,
-        allquads :: quadenum,
+        quadmap :: quadenum,
+        playerquads :: map(player, iquads),
         xsects :: xsects
     ).
 
-:- type quadenum == bimap(int, quad(player)).
+:- type quadenum == bimap(int, pquad).
 :- type xsects == version_array(sparse_bitset(iquad)).
 
 %------------------------------ UTILITIES -------------------------------------%
@@ -82,11 +87,13 @@ initCtx(NTables, NHanchans) = ctx(
         NTables,
         NHanchans,
         QuadsEnum,
+        PlayerQuadsMap,
         Intersections
-    ) :- PlayerSet = set(1..(NTables * 4)),
-         AllQuads = allQuads(PlayerSet),
+    ) :- PlayerSet = from_list(1..(NTables * 4)),
+         AllQuads = allQuads(to_set(PlayerSet)),
          QuadsEnum = quadNumbering(AllQuads),
-         Intersections = precomputeXsectBitmaps(QuadsEnum).
+         Intersections = precomputeXsectBitmaps(QuadsEnum),
+         PlayerQuadsMap = precomputePlayerQuadMap(PlayerSet, QuadsEnum).
 
 :- func quadToSet(quad(T)) = set(T).
 quadToSet({PA,PB,PC,PD}) = sorted_list_to_set([PA,PB,PC,PD]).
@@ -174,9 +181,31 @@ precomputeXsectBitmap(Q0, QN) = sorted_list_to_set(list.reverse(bimap.foldl(
     func(IQ, Q, LAcc) = (if quadXsect(Q0, Q) then [IQ | LAcc] else LAcc),
     QN, []))).
 
+% cached lookup "which quads given player appears in"
+:- func precomputePlayerQuadMap(
+    set_tree234(player), quadenum) = map(player, iquads) is det.
+precomputePlayerQuadMap(Players, QuadMap) = map.optimize(R) :-
+    bimap.foldl(
+        pred(IQ::in, {A,B,C,D}::in, MAcc0::in, MNew::out) is det :- (
+            map.det_transform_value(insert(IQ), A, MAcc0, MAcc1),
+            map.det_transform_value(insert(IQ), B, MAcc1, MAcc2),
+            map.det_transform_value(insert(IQ), C, MAcc2, MAcc3),
+            map.det_transform_value(insert(IQ), D, MAcc3, MNew)
+        ),
+        QuadMap, Map0, R),
+    Map0 = map.from_corresponding_lists(
+        L @ to_sorted_list(Players),
+        list.duplicate(length(L), set_tree234.init)
+    ).
 
 :- func cullConflictingQuads(pquads, pquad) = pquads.
-cullConflictingQuads(QSi, Qc) = set.filter(quadConflictNot(Qc), QSi).
+cullConflictingQuads(QS, Qc) = filter(quadConflictNot(Qc), QS).
+
+:- func cullConflictingIquads(quadenum, iquads, iquad) = iquads.
+cullConflictingIquads(QM, IQs, IQx) = filter(
+    %-- TODO optimize here using Ctx^playerquads
+    (pred(IQy::in) is semidet :- quadConflictNot(lookup(QM, IQx), lookup(QM, IQy))),
+    IQs).
 
 :- func cullHanchanQuads(hanchan, pquads) = pquads.
 cullHanchanQuads(Hanchan, Qs) = set.filter((
@@ -187,7 +216,7 @@ cullHanchanQuads(Hanchan, Qs) = set.filter((
         )
     ), Qs) :-
     HanchanPairs = set(condense(map(tablePairs, Hanchan)))
-    .
+    . %-- 29% allocs here
 
 :- pred sufficientQuadsCut(int::in, set(player)::in, pquads::in) is semidet.
 sufficientQuadsCut(NH, Players, Quads) :-
@@ -200,6 +229,19 @@ sufficientQuadsCut(NH, Players, Quads) :-
 countPlayersQuads(P, Quads) = set.count(set.filter(
     (pred({A,B,C,D}::in) is semidet :- P = A; P = B; P = C; P = D),
     Quads)).
+
+:- pred sufficientIquadsCut(
+    ctx::in,
+    int::in,
+    set_tree234(player)::in,
+    iquads::in) is semidet.
+sufficientIquadsCut(Ctx, NH, Players, Iquads) :-
+    %count(Players) =< count(Iquads),
+    all_true(
+        pred(P::in) is semidet :- count(
+            lookup(Ctx^playerquads, P) `intersect` Iquads
+            ) >= NH,
+        Players).
 
 
 :- pred fillAllTables(
@@ -253,7 +295,84 @@ searchNHanchans({N, NH}, Players, [H0 | Hn1], QuadsUpd) :-
     .
 
 
-%----- PRETTY PRINTING -----
+:- pred fillHanchan(
+    ctx::in,
+    set_tree234(player)::in,
+    set_tree234(iquad)::in,
+    list(iquad)::in,
+    list(iquad)::out,
+    sparse_bitset(iquad)::out) is nondet.
+fillHanchan(_,   init,    _,           _,                  [],        init).
+fillHanchan(Ctx, Players, AvailIquads, [TMin0i|TMins], [T0i|TTi], NewXsects) :-
+    %-- symmbreak tables-per-hanchan
+    remove_least(MinPlayer, Players, PlayersSansMin),
+    NonBoringIquads = filter(
+        pred(IQ::in) is semidet :- (
+            IQ >= TMin0i, %-- symmbreak hanchans-per-schedule
+            {A,B,C,D} = lookup(Ctx^quadmap, IQ),
+            MinPlayer = A,
+            member(B, PlayersSansMin),
+            member(C, PlayersSansMin),
+            member(D, PlayersSansMin)
+        ), AvailIquads),
+
+    %-- the choice point
+    member(T0i, NonBoringIquads),
+
+    HereXsects = Ctx^xsects^elem(T0i),
+    IquadsNX = AvailIquads `difference` from_set(to_set(HereXsects)),
+    IquadsRestPlayers = cullConflictingIquads(Ctx^quadmap, IquadsNX, T0i),
+    {MinPlayer, PB, PC, PD} = lookup(Ctx^quadmap, T0i),
+    PlayersRest = PlayersSansMin `difference` from_list([PB, PC, PD]),
+    sufficientIquadsCut(Ctx, 1, PlayersRest, IquadsRestPlayers),
+    fillHanchan(Ctx, PlayersRest, IquadsRestPlayers, TMins, TTi, MoreXsects),
+    NewXsects = HereXsects `union` MoreXsects.
+
+:- pred searchSchedule(ctx::in, schedule::out) is nondet.
+searchSchedule(Ctx, Solution) :-
+    NP = 4 * NT @ (Ctx^numtables),
+    NH = Ctx ^ numhanchans,
+
+    MinIquads = duplicate(NT, -1),
+    AvailIquads0 = from_list(bimap.ordinates(Ctx^quadmap))
+                `with_type` set_tree234(iquad), %-- [0..NQ)
+
+    trace [io(!IO)] (
+        io.format("--- searchSchedule entry init done ---\n", [], !IO),
+        io.report_stats("full_memory_stats", !IO)
+        ),
+
+    foldl3(
+        pred(HanchanIndex::in,
+            AvailIquads::in,
+            AvailIquads1::out,
+            MinIquads0::in,
+            MinIquads1::out,
+            S0::in,
+            [TakenHanchan|S0]::out) is nondet :-
+        (
+            %-- the choice point
+            fillHanchan(Ctx, Ctx^allplayers, AvailIquads, MinIquads0,
+                TakenHanchan, XsectIquads_out),
+            AvailIquads1 = AvailIquads `difference`
+                from_set(to_set(XsectIquads_out)) `with_type` iquads,
+
+            %-- the whole last hanchan (+1) is used to set MinIquads1
+            split_last(TakenHanchan, MinIquadsPre, MinIquadsLast),
+            MinIquads1 = MinIquadsPre ++ [MinIquadsLast + 1],
+
+            %-- heuristic check
+            sufficientIquadsCut(Ctx, NH - HanchanIndex, Ctx^allplayers, AvailIquads1)
+        ),
+        1..NH,
+        AvailIquads0, _,
+        MinIquads, _,
+        [], SolIqs
+    ),
+
+    %-- remap list(list(iquad)) back to expected Solution
+    Solution = map(func(H) = map(func(IQ) = lookup(Ctx^quadmap, IQ), H), SolIqs)
+    .
 
 %---------------------------------- CMDLINE -----------------------------------%
 
@@ -329,16 +448,25 @@ main(Options, !IO) :-
         run_search({NPlayers, NHanchans}, !IO)
     ).
 
+:- pred wallclock(float, pred(io, io), io, io).
+:- mode wallclock(out, pred(di, uo) is det, di, uo) is det.
+wallclock(ResultSeconds, Action, !IO) :-
+    time.clock(ActionTimestamp0, !IO),
+    Action(!IO),
+    time.clock(ActionTimestamp1, !IO),
+    ResultSeconds = float(ActionTimestamp1 - ActionTimestamp0)
+                    / float(time.clocks_per_sec).
+
 :- pred run_search({int, int}::in, io::di, io::uo) is cc_multi.
 run_search({NP, NH}, !IO) :-
-    /* io.write_string("Warming up...", !IO), io.flush_output(!IO),
-    time.clock(InitT0, !IO),
-
-    Ctx = initCtx(NP // 4, NH),
-
-    time.clock(InitT1, !IO),
-    SecondsElapsed = float(InitT1 - InitT0) / float(time.clocks_per_sec),
-    io.format(" done in %.3fs.\n", [f(SecondsElapsed)], !IO), */
+    %io.write_string("Warming up...", !IO), io.flush_output(!IO),
+    %time.clock(InitT0, !IO),
+    %
+    %Ctx = initCtx(NP // 4, NH),
+    %
+    %time.clock(InitT1, !IO),
+    %SecondsElapsed = float(InitT1 - InitT0) / float(time.clocks_per_sec),
+    %io.format(" done in %.3fs.\n", [f(SecondsElapsed)], !IO),
 
     do_while(
         pred(Solution::out) is nondet :-
