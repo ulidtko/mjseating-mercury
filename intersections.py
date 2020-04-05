@@ -1,8 +1,10 @@
-from itertools import combinations
-from collections import Counter
-from pprint import pprint
-from io import StringIO
+import io
+import json
 import re, sys
+from collections import Counter
+from io import StringIO
+from itertools import combinations
+from pprint import pprint, pformat
 
 def flat(lists):
     return sum(list(lists), [])
@@ -91,14 +93,26 @@ def mercury2quads(input):
 
     return flat(parse_list())
 
+def check_jsonl_seatings(input_linegen):
+    for lineno, line in enumerate(input_linegen):
+        v = json.loads(line)
+        quads = flat(map(lambda s: quad(*s),
+                flat(v.values() if hasattr(v, 'keys') else v)))
+
+        isects = intersections(quads)
+        print(f"\n{len(isects)} intersections in seating (line {lineno})")
+        if isects:
+            print(f"namely:\n{pformat(isects)}")
+
+
 def check_mercury_seating(str):
     pairs = flat(map(lambda s: quad(*s), mercury2quads(str)))
     isects = intersections(pairs)
     print()
-    print("%d intersections in this seating:\n%s" % (len(isects), str))
+    print("%d intersections in this seating:\n%s" % (len(isects), pformat(pairs)))
     if len(isects):
         print("namely:")
-        pprint(intersections(pairs))
+        pprint(isects)
 
 def intersections(pairarr):
     return {p: count for p, count in Counter(pairarr).items()
@@ -180,6 +194,5 @@ if __name__=="__main__":
     print("seating1 intersections:")
     pprint(intersections(seating1()))
 
-    #-- egrep '^[[]' data/seatings.P24.H6.dump | python intersections.py
-    for s in sys.stdin:
-        check_mercury_seating(s)
+    #-- jq -c < data/seatings.P32.H6.jshon | python intersections.py
+    check_jsonl_seatings(line for line in sys.stdin)
