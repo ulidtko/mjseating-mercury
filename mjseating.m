@@ -1,4 +1,4 @@
-% Copyright (C) 2015-2020 Max Ulidtko <ulidtko@gmail.com>. All rights reserved.
+% Copyright (C) 2015-2023 Max Ulidtko <ulidtko@gmail.com>. All rights reserved.
 % SPDX-License-Identifier: MIT
 
 % This file is written in [Mercury], a statically-typed Prolog variant.
@@ -219,7 +219,7 @@ cullHanchanQuads(Hanchan, Qs) = set.filter((
             set.init
         )
     ), Qs) :-
-    HanchanPairs = set(condense(map(tablePairs, Hanchan)))
+    HanchanPairs = list_to_set(condense(map(tablePairs, Hanchan)))
     . %-- 29% allocs here
 
 :- pred sufficientQuadsCut(int::in, set(player)::in, pquads::in) is semidet.
@@ -411,7 +411,7 @@ usage = join_list("\n", [
 
 main -->
     command_line_arguments(Args),
-    process_options(option_ops_multi(shortOpt, longOpt, defOpt), Args, _, ParsedOpts),
+    process_options_io(option_ops_multi(shortOpt, longOpt, defOpt), Args, _, ParsedOpts),
     (
         { ParsedOpts = ok(Options) },
         (
@@ -423,7 +423,7 @@ main -->
         )
     ;
         { ParsedOpts = error(E) },
-        write_string("Couldn't parse cmdline: " ++ E ++ "\n\n"),
+        write_string("Couldn't parse cmdline: " ++ option_error_to_string(E) ++ "\n\n"),
         print(usage),
         set_exit_status(1)
     ).
